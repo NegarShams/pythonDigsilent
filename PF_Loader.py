@@ -8,14 +8,16 @@
 ###																													###
 #######################################################################################################################
 
-TODO - GUI to request the following details:
+TODO - Build GUI to request the following details:
 TODO 1. user_name (is it possible to get the default user_name from powerfactory)
-TODO 2. pf_version
+TODO 2. drop down selector for power factory version (see JA7896 project:  pscharmonics.gui.MainGui lines 449-466)
+TODO 2.1 - JA7896 project:  pscharmonics.pf.PowerFactory has a search routine for finding all installed versions
 TODO 3. tick boxes for licenses to activate
+TODO 4. Storing previous details of installed PowerFactory versions to avoid searching every time
+TODO:    (only need to do this if actually takes a long time)
 
-TODO - Script will also need to have functions to:
-TODO 1. Search PC to find installed PF versions (detect versions which are not compatible with the running version of Python)
-TODO 2. Store previous values and directories for faster loading
+
+TODO: The code to actually change the selected license, etc. also needs to be written into functions
 """
 
 
@@ -33,8 +35,10 @@ pf_version = '2018'
 
 DIG_PATH_2016 = r'C:\Program Files\DIgSILENT\PowerFactory 2016 SP5'
 DIG_PATH_2018 = r'C:\Program Files\DIgSILENT\PowerFactory 2018 SP5'
+DIG_PATH_2019 = r'C:\Program Files\DIgSILENT\PowerFactory 2019'
 DIG_PYTHON_PATH_2016 = r'C:\Program Files\DIgSILENT\PowerFactory 2016 SP5\Python\3.5'
-DIG_PYTHON_PATH_2018 = r'C:\Program Files\DIgSILENT\PowerFactory 2018 SP5\Python\3.5'
+DIG_PYTHON_PATH_2018 = r'C:\Program Files\DIgSILENT\PowerFactory 2018 SP7\Python\3.5'
+DIG_PYTHON_PATH_2019 = r'C:\Program Files\DIgSILENT\PowerFactory 2019\Python\3.5'
 
 if pf_version == '2016':
 	DIG_PATH = DIG_PATH_2016
@@ -42,6 +46,9 @@ if pf_version == '2016':
 elif pf_version == '2018':
 	DIG_PATH = DIG_PATH_2018
 	DIG_PYTHON_PATH = DIG_PYTHON_PATH_2018
+elif pf_version == '2019':
+	DIG_PATH = DIG_PATH_2019
+	DIG_PYTHON_PATH = DIG_PYTHON_PATH_2019
 else:
 	print('ERROR python version not found')
 	raise SyntaxError('ERROR')
