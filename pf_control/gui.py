@@ -76,7 +76,7 @@ class MainGui:
         )
 
         # Get selected PowerFactory version and Define the powerfactory application path
-        selected_pf_version = self.selected_pf_version.get()
+        self.selected_pf_version_get = self.selected_pf_version.get()
 
         # Add checkbox for each simulation module
         self.power_quality = self.add_checkbox(
@@ -588,7 +588,7 @@ if __name__ == '__main__':
 
     main_gui = pf_control.gui.MainGui()
 
-    selected_dig_path = os.path.join(constants.PowerFactory.default_install_directory, main_gui.selected_pf_version)
+    selected_dig_path = os.path.join(constants.PowerFactory.default_install_directory, main_gui.selected_pf_version_get)
 
     if main_gui.power_factory_launch_button == 1:
         subprocess.Popen(os.path.join(selected_dig_path, 'PowerFactory.exe'))
