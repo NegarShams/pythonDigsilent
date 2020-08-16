@@ -7,14 +7,16 @@ import tkinter.filedialog
 import tkinter.scrolledtext
 import tkinter.messagebox as messagebox
 import tkinter.ttk as ttk
-import sys
 import os
 from tkinter import *
+
+from PIL import Image, ImageTk
 
 import pf_control
 import pf_control.constants as constants
 
 import subprocess
+import platform
 
 import sys
 sys.path.append(r"C:\Program Files\DIgSILENT\PowerFactory 2020\python\3.8")
@@ -23,12 +25,11 @@ import powerfactory
 
 class MainGui:
     """
-        Main class to produce the GUI for user interaction
-        Allows the user to set up the parameters and define the cases to run the studies
+        Main class to produce the GUI for PowerFactory Loader
 
     """
 
-    def __init__(self, pf_version, title=constants.GuiDefaults.gui_title):
+    def __init__(self, title=constants.GuiDefaults.gui_title):
         """
         Initialise GUI
         :param str pf_version: - This is the version of the running PowerFactory instance, if none then will populate
@@ -37,10 +38,18 @@ class MainGui:
         """
         self.logger = constants.logger
 
+        self.power_factory_launch_button = 0
+
         # Initialise constants and Tk window
         tk.Tk.report_callback_exception = self.show_error
         self.master = tk.Tk()
         self.master.title(title)
+
+        # Change color of main window
+        self.master.configure(bg=constants.GuiDefaults.color_main_window)
+
+        # Ensure that on_closing is processed correctly
+        self.master.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # General constants which needs to be initialised
         self._row = 0
@@ -51,16 +60,14 @@ class MainGui:
 
         # Get a reference to all PowerFactory versions
         pf_constants = constants.PowerFactory()
-        if pf_version:
-            # If a PowerFactory version is already running then just display that version and disable the button
-            dropdown_state = tk.DISABLED
-        else:
-            # Set the default value as the most recent version and enable dropdown
-            pf_version = pf_constants.available_power_factory_versions[-1]
-            dropdown_state = tk.NORMAL
+
+        # Set the default value as the most recent version and enable dropdown
+        pf_version = pf_constants.available_power_factory_versions[-1]
+        dropdown_state = tk.NORMAL
+
         # Add a label and DropDown box to select the PowerFactory version
         _ = self.add_minor_label(
-            row=self.row(1), col=self.col(), label='Select PowerFactory version:', columnspan=1,
+            row=self.row(), col=self.col(), label='Select PowerFactory Version:', columnspan=1,
             style=self.styles.label_general_left
         )
         self.selected_pf_version = self.add_dropdown_list(
@@ -68,39 +75,176 @@ class MainGui:
             def_value=pf_version, state=dropdown_state
         )
 
+        # Get selected PowerFactory version and Define the powerfactory application path
+        selected_pf_version = self.selected_pf_version.get()
+
         # Add checkbox for each simulation module
-        self.protection = self.add_checkbox(
-            row=self.row(2), col=self.col(), text="Power Quality"
+        self.power_quality = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Power Quality"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(), col=self.col()+1, text="Contingency Analysis"
+        self.contingency = self.add_checkbox(
+            row=self.row(), col=self.col() + 1, text="Contingency Analysis"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(3), col=self.col(), text="Quasi-Dynamic Simulation"
+        self.quasi_dynamic = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Quasi-Dynamic Simulation"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(), col=self.col()+1, text="Scripting and Automation"
+        self.scripting = self.add_checkbox(
+            row=self.row(), col=self.col() + 1, text="Scripting and Automation"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(4), col=self.col(), text="Stability Analysis"
+        self.stability = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Stability Analysis"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(), col=self.col()+1, text="Small Signal Stability"
+        self.small_signal = self.add_checkbox(
+            row=self.row(), col=self.col() + 1, text="Small Signal Stability"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(5), col=self.col(), text="Network Reduction"
+        self.network_reduction = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Network Reduction"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(), col=self.col()+1, text="System Parameter Identification"
+        self.parameter_identification = self.add_checkbox(
+            row=self.row(), col=self.col() + 1, text="System Parameter Identification"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(6), col=self.col(), text="Overcurrent Protection"
+        self.overcurrent_protection = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Overcurrent Protection"
         )
-        self.protection = self.add_checkbox(
-            row=self.row(), col=self.col()+1, text="Arc-Flash Analysis"
+        self.arc_flash = self.add_checkbox(
+            row=self.row(), col=self.col() + 1, text="Arc-Flash Analysis"
+        )
+
+        # Add button for user to confirm selection and open PF in engine mode to change licence settings
+        self.button_confirm_settings = self.add_cmd(
+            label=constants.GuiDefaults.button_select_settings_label,
+            cmd=self.change_licence_settings, tooltip='Click to confirm the selected settings',
+            row=self.row(1), col=self.col()
+        )
+
+        # Add button for user to launch PF
+        self.button_launch_powerfactory = self.add_cmd(
+            label=constants.GuiDefaults.button_launch_powerfactory_label,
+            cmd=self.launch_powerfactory, tooltip='Click to launch PowerFactory', state=tk.DISABLED,
+            row=self.row(), col=self.col()+1
+        )
+
+        _ = self.add_instruction_label(
+            row=self.row(1), col=self.col(), label='Action and Status:', columnspan=1,
+            style=self.styles.label_general_left
+        )
+        self.status_bar = self.add_status_label(
+            row=self.row(1), col=self.col(), label='Please select PF version and licences, and confirm selection.', columnspan=2,
+            style=self.styles.label_general_left
+        )
+
+        _ = self.add_note_label(
+            row=self.row(1), col=self.col(), label='Note: Base package licences will be enabled by default.', columnspan=2,
+            style=self.styles.label_general_left
+        )
+        # Add PSC logo in Windows Manager
+        self.add_psc_logo_wm()
+
+        # Add PSC logo with hyperlink to the website
+        self.add_logo(
+            row=self.row(1), col=self.col(),
+            img_pth=constants.GuiDefaults.img_pth_psc_main,
+            hyperlink="None",
+            size=constants.GuiDefaults.img_size_psc
         )
 
         self.master.mainloop()
+
+    def change_licence_settings(self):
+
+        response = self.ping(constants.PowerFactory.power_factory_host)
+        self.status_bar.configure(text="Check VPN connection")
+        # and then check the response, if no VPN connection, indicate this in the GUI status output
+        if response == 0:
+
+            # Open PF in engine mode and get current user
+            self.status_bar.configure(text="Open PowerFactory in engine mode")
+            app = powerfactory.GetApplication('Administrator')
+            self.status_bar.configure(text="Apply the confirmed selection")
+            users = app.GetAllUsers()
+            # Set selected license
+            for user in users:
+                if user.loc_name != 'Administrator':
+                    user.check_adv = 0
+                    user.harm = self.power_quality.get()
+                    user.contingency = self.contingency.get()
+                    user.qdynsim = self.quasi_dynamic.get()
+                    user.script = self.scripting.get()
+                    user.stab = self.stability.get()
+                    user.smallsig = self.small_signal.get()
+                    user.netred = self.network_reduction.get()
+                    user.paramid = self.parameter_identification.get()
+                    user.prot = self.overcurrent_protection.get()
+                    user.arcflash = self.arc_flash.get()
+
+                    self.status_bar.configure(text="Licence selection updated, please launch PowerFactory")
+                    self.button_launch_powerfactory.configure(state=tk.NORMAL)
+        else:
+            self.status_bar.configure(text="No VPN Connection")
+
+    def ping(self, host):
+        """
+        Returns True if host (str) responds to a ping request.
+        Remember that a host may not respond to a ping (ICMP) request even if the host name is valid.
+        """
+
+        # Option for the number of packets as a function of
+        param = '-n' if platform.system().lower() == 'windows' else '-c'
+
+        # Building the command. Ex: "ping -c 1 google.com"
+        command = ['ping', param, '1', host]
+
+        return subprocess.call(command)
+
+    def launch_powerfactory(self):
+
+        self.power_factory_launch_button = 1
+
+        self.master.destroy()
+
+    def add_psc_logo_wm(self):
+        """
+            Function just adds the PSC logo to the windows manager in GUI
+        :return: None
+        """
+        # Create the PSC logo for including in the windows manager
+        logo = tk.PhotoImage(file=constants.GuiDefaults.img_pth_psc_window)
+        # noinspection PyProtectedMember
+        self.master.tk.call('wm', 'iconphoto', self.master._w, logo)
+        return None
+
+    def add_logo(self, row, col, img_pth, hyperlink=None, size=constants.GuiDefaults.img_size_psc):
+        """
+            Function to add an image which when clicked is a hyperlink to the companies logo.
+            Image is added using a label and changing the it to be an image and binding a hyperlink to it
+        :param int row:  Row number to use
+        :param int col:  Column number to use
+        :param str img_pth:  Path to image to use
+        :param str hyperlink:  (optional=None) Website hyperlink to use
+        :param str tooltip:  (Optional=None) Popup message to use for mouse over
+        :param tuple size: (optional) - Size to make image when inserting
+        :return ttk.Label logo:  Reference to the newly created logo
+        """
+        # Load the image and convert into a suitable size for displaying on the GUI
+        img = Image.open(img_pth)
+        img.thumbnail(size)
+        # Convert to a photo image for inclusion on the GUI
+        img_to_include = ImageTk.PhotoImage(img)
+
+        # Add image to GUI
+        logo = tk.Label(self.master, image=img_to_include,
+                        bg='white')
+        logo.photo = img_to_include
+        logo.grid(row=row, column=col, columnspan=2, pady=10)
+
+        # Associate clicking of the button as opening a web browser with the provided hyperlink
+        if hyperlink:
+            logo.bind(
+                constants.GuiDefaults.mouse_button_1,
+                lambda e: webbrowser.open_new(hyperlink)
+            )
+
+        return logo
 
     def row(self, i=0):
         """
@@ -131,8 +275,54 @@ class MainGui:
         :return ttk.Label lbl:  Reference to the newly created label
         """
         # Add label with the name to the GUI
-        lbl = ttk.Label(self.master, text=label, style=style)
+        lbl = ttk.Label(self.master, text=label, style=style, font=(constants.GuiDefaults.font_family, 9))
+        lbl.grid(row=row, column=col, columnspan=columnspan, pady=5, sticky=W)
+        return lbl
+
+    def add_instruction_label(self, row, col, label, style, columnspan=2):
+        """
+            Function to add the name to the GUI
+        :param row: Row number to use
+        :param col: Column number to use
+        :param str label: Label to use for header
+        :param sty style: Style to use
+        :param int columnspan:  (optional) - Number of columns to span
+        :return ttk.Label lbl:  Reference to the newly created label
+        """
+        # Add label with the name to the GUI
+        lbl = ttk.Label(self.master, text=label, style=style, font=(constants.GuiDefaults.font_family, 10))
+        lbl.grid(row=row, column=col, columnspan=columnspan, pady=5, sticky=W)
+        return lbl
+
+    def add_status_label(self, row, col, label, style, columnspan=2):
+        """
+            Function to add the status to the GUI
+        :param row: Row number to use
+        :param col: Column number to use
+        :param str label: Label to use for header
+        :param sty style: Style to use
+        :param int columnspan:  (optional) - Number of columns to span
+        :return ttk.Label lbl:  Reference to the newly created label
+        """
+        # Add label with the name to the GUI
+        lbl = ttk.Label(self.master, text=label, style=style, font=(constants.GuiDefaults.font_family, 9),
+                        background="white", foreground="blue")
         lbl.grid(row=row, column=col, columnspan=columnspan, pady=5)
+        return lbl
+
+    def add_note_label(self, row, col, label, style, columnspan=2):
+        """
+            Function to add the status to the GUI
+        :param row: Row number to use
+        :param col: Column number to use
+        :param str label: Label to use for header
+        :param sty style: Style to use
+        :param int columnspan:  (optional) - Number of columns to span
+        :return ttk.Label lbl:  Reference to the newly created label
+        """
+        # Add label with the name to the GUI
+        lbl = ttk.Label(self.master, text=label, style=style, font=(constants.GuiDefaults.font_family, 10))
+        lbl.grid(row=row, column=col, columnspan=columnspan, pady=10, sticky=W)
         return lbl
 
     def add_checkbox(self, row, col, text):
@@ -174,6 +364,49 @@ class MainGui:
         option_menu.configure(state=state)
         return variable
 
+    def add_cmd(self, label, cmd, state=tk.NORMAL, tooltip=str(), row=None, col=None):
+        """
+            Function just adds the command button to the GUI which is used for loading the SAV case
+        :param int row: (optional) Row number to use
+        :param int col: (optional) Column number to use
+        :param str label:  Label to use for button
+        :param func cmd: Command to use when button is clicked
+        :param int state:  Tkinter state for button initially
+        :param str tooltip:  Message that pops up if hover over button
+        :return None:
+        """
+        # If no number is provided for row or column then assume to add 1 to row and 0 to column
+        if not row:
+            row = self.row(1)
+        if not col:
+            col = self.col()
+
+        button = ttk.Button(
+            self.master, text=label, command=cmd, style=self.styles.cmd_buttons, state=state)
+        button.grid(row=row, column=col, padx=5, pady=5, sticky=tk.W + tk.E)
+        CreateToolTip(widget=button, text=tooltip)
+
+        return button
+
+    def on_closing(self):
+        """
+            Function runs when window is closed to determine if user actually wants to cancel running of study
+        :return None:
+        """
+        # Ask user to confirm that they actually want to close the window
+        result = messagebox.askquestion(
+            title='Exit PowerFactory Loader?',
+            message='Are you sure you want to close the loader'
+        )
+
+        # Test what option the user provided
+        if result == 'yes':
+            self.abort = True
+            self.master.destroy()
+            return None
+        else:
+            return None
+
     def show_error(self, *args):
         """
             Function to deal with error handling that occurs when running tkinter
@@ -182,7 +415,7 @@ class MainGui:
         """
         # Close all windows and exit Python
         self.master.destroy()
-        self.logger.exception_handler(*args)
+        # self.logger.exception_handler(*args)
 
         # Close all tkinter windows
         sys.exit(1)
@@ -262,6 +495,72 @@ class CustomStyles:
         return None
 
 
+class CreateToolTip(object):
+    """
+		Function to create a popup tool tip for a given widget based on the descriptions provided here:
+			https://stackoverflow.com/questions/3221956/how-do-i-display-tooltips-in-tkinter
+	"""
+
+    def __init__(self, widget, text="widget info"):
+        """
+			Establish link with tooltip
+		:param widget: Tkinter element that tooltip should be associated with
+		:param text:    Message to display when hovering over button
+		"""
+        self.wait_time = 500  # milliseconds
+        self.wrap_length = 450  # pixels
+        self.widget = widget
+        self.text = text
+        self.widget.bind("<Enter>", self.enter)
+        self.widget.bind("<Leave>", self.leave)
+        self.widget.bind("<ButtonPress>", self.leave)
+        self.id = None
+        self.tw = None
+
+    def enter(self, event=None):
+        del event
+        self.schedule()
+
+    def leave(self, event=None):
+        del event
+        self.unschedule()
+        self.hidetip()
+
+    def schedule(self, event=None):
+        del event
+        self.unschedule()
+        self.id = self.widget.after(self.wait_time, self.showtip)
+
+    def unschedule(self, event=None):
+        del event
+        _id = self.id
+        self.id = None
+        if _id:
+            self.widget.after_cancel(_id)
+
+    def showtip(self):
+        x, y, cx, cy = self.widget.bbox("insert")
+        x += self.widget.winfo_rootx() + 25
+        y += self.widget.winfo_rooty() + 20
+        # creates a top level window
+        self.tw = tk.Toplevel(self.widget)
+        self.tw.attributes('-topmost', 'true')
+        # Leaves only the label and removes the app window
+        self.tw.wm_overrideredirect(True)
+        self.tw.wm_geometry("+%d+%d" % (x, y))
+        label = tk.Label(
+            self.tw, text=self.text, justify='left', background="#ffffff", relief='solid', borderwidth=1,
+            wraplength=self.wrap_length
+        )
+        label.pack(ipadx=1)
+
+    def hidetip(self):
+        tw = self.tw
+        self.tw = None
+        if tw:
+            tw.destroy()
+
+
 def running_in_powerfactory():
     """
         This function determines whether has been launched from PowerFactory or from a python terminal.
@@ -287,26 +586,9 @@ if __name__ == '__main__':
     # Determine if running from PowerFactory and if so retrieve the current power factory version
     pf_version = running_in_powerfactory()
 
-    main_gui = pf_control.gui.MainGui(pf_version=pf_version)
+    main_gui = pf_control.gui.MainGui()
 
-    # Get selected PowerFactory version
-    selected_pf_version = main_gui.selected_pf_version.get()
+    selected_dig_path = os.path.join(constants.PowerFactory.default_install_directory, main_gui.selected_pf_version)
 
-    # Get selected settings
-    protection_license = main_gui.protection.get()
-
-    print("end of programme %s" % selected_pf_version)
-    print("end of programme %d" % protection_license)
-
-    # Find the installation directory for the PowerFactory paths
-    DIG_PATH = os.path.join(constants.PowerFactory.default_install_directory, selected_pf_version)
-
-    app = powerfactory.GetApplicationExt()
-    user = app.GetCurrentUser()
-    name = user.loc_name
-    print('Current user is %s' % name)
-    user.prot = protection_license
-
-    subprocess.Popen(os.path.join(DIG_PATH, 'PowerFactory.exe'))
-
-    print('PowerFactory Opened')
+    if main_gui.power_factory_launch_button == 1:
+        subprocess.Popen(os.path.join(selected_dig_path, 'PowerFactory.exe'))
