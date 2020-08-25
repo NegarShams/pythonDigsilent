@@ -3,8 +3,6 @@
 
 """
 import tkinter as tk
-import tkinter.filedialog
-import tkinter.scrolledtext
 import tkinter.messagebox as messagebox
 import tkinter.ttk as ttk
 import os
@@ -14,13 +12,12 @@ from PIL import Image, ImageTk
 
 import pf_control
 import pf_control.constants as constants
+import webbrowser
 
 import subprocess
 import platform
 
 import sys
-sys.path.append(r"C:\Program Files\DIgSILENT\PowerFactory 2020\python\3.8")
-import powerfactory
 
 
 class MainGui:
@@ -32,13 +29,14 @@ class MainGui:
     def __init__(self, title=constants.GuiDefaults.gui_title):
         """
         Initialise GUI
-        :param str pf_version: - This is the version of the running PowerFactory instance, if none then will populate
-        a drop down list of available PowerFactory versions
         :param str title: (optional) - Title to be used for main window
         """
+        self.pf = pf_control.pf.PowerFactory()
         self.logger = constants.logger
 
         self.power_factory_launch_button = 0
+
+        self.pf_version = None
 
         # Initialise constants and Tk window
         tk.Tk.report_callback_exception = self.show_error
@@ -59,10 +57,10 @@ class MainGui:
         self.styles = CustomStyles()
 
         # Get a reference to all PowerFactory versions
-        pf_constants = constants.PowerFactory()
+        self.c = constants.PowerFactory()
 
         # Set the default value as the most recent version and enable dropdown
-        pf_version = pf_constants.available_power_factory_versions[-1]
+        default_pf_version = self.c.available_power_factory_versions[-1]
         dropdown_state = tk.NORMAL
 
         # Add a label and DropDown box to select the PowerFactory version
@@ -71,12 +69,12 @@ class MainGui:
             style=self.styles.label_general_left
         )
         self.selected_pf_version = self.add_dropdown_list(
-            row=self.row(), col=self.col() + 1, values=pf_constants.available_power_factory_versions,
-            def_value=pf_version, state=dropdown_state
+            row=self.row(), col=self.col() + 1, values=self.c.available_power_factory_versions,
+            def_value=default_pf_version, state=dropdown_state
         )
 
         # Get selected PowerFactory version and Define the powerfactory application path
-        self.selected_pf_version_get = self.selected_pf_version.get()
+        #self.selected_pf_version_get = self.selected_pf_version.get()
 
         # Add checkbox for each simulation module
         self.power_quality = self.add_checkbox(
@@ -124,6 +122,9 @@ class MainGui:
             row=self.row(), col=self.col()+1
         )
 
+        # Separator
+        self.add_sep(row=self.row(1), col_span=2)
+
         _ = self.add_instruction_label(
             row=self.row(1), col=self.col(), label='Action and Status:', columnspan=1,
             style=self.styles.label_general_left
@@ -152,33 +153,36 @@ class MainGui:
 
     def change_licence_settings(self):
 
-        response = self.ping(constants.PowerFactory.power_factory_host)
         self.status_bar.configure(text="Check VPN connection")
+        self.master.update()
+        response = self.ping(constants.PowerFactory.power_factory_host)
         # and then check the response, if no VPN connection, indicate this in the GUI status output
         if response == 0:
 
             # Open PF in engine mode and get current user
-            self.status_bar.configure(text="Open PowerFactory in engine mode")
-            app = powerfactory.GetApplication('Administrator')
-            self.status_bar.configure(text="Apply the confirmed selection")
-            users = app.GetAllUsers()
-            # Set selected license
-            for user in users:
-                if user.loc_name != 'Administrator':
-                    user.check_adv = 0
-                    user.harm = self.power_quality.get()
-                    user.contingency = self.contingency.get()
-                    user.qdynsim = self.quasi_dynamic.get()
-                    user.script = self.scripting.get()
-                    user.stab = self.stability.get()
-                    user.smallsig = self.small_signal.get()
-                    user.netred = self.network_reduction.get()
-                    user.paramid = self.parameter_identification.get()
-                    user.prot = self.overcurrent_protection.get()
-                    user.arcflash = self.arc_flash.get()
+            self.status_bar.configure(text="Setting up PowerFactory licence (take around 10 seconds)")
+            self.master.update()
 
-                    self.status_bar.configure(text="Licence selection updated, please launch PowerFactory")
-                    self.button_launch_powerfactory.configure(state=tk.NORMAL)
+            self.pf_version = self.selected_pf_version.get()
+            app = self.pf.initialise_power_factory(pf_version=self.pf_version)
+            user = app.GetCurrentUser()
+            # Set selected license
+            user.check_adv = 0
+            user.harm = self.power_quality.get()
+            user.contingency = self.contingency.get()
+            user.qdynsim = self.quasi_dynamic.get()
+            user.script = self.scripting.get()
+            user.stab = self.stability.get()
+            user.smallsig = self.small_signal.get()
+            user.netred = self.network_reduction.get()
+            user.paramid = self.parameter_identification.get()
+            user.prot = self.overcurrent_protection.get()
+            user.arcflash = self.arc_flash.get()
+
+            # Enable PowerFactory Launching Button
+            self.status_bar.configure(text="Licence selection updated, click Launch PowerFactory")
+            self.master.update()
+            self.button_launch_powerfactory.configure(state=tk.NORMAL)
         else:
             self.status_bar.configure(text="No VPN Connection")
 
@@ -263,6 +267,18 @@ class MainGui:
         """
         self._col += i
         return self._col
+
+    def add_sep(self, row, col_span):
+        """
+            Function just adds a horizontal separator
+        :param row: Row number to use
+        :param col_span: Column span number to use
+        :return None:
+        """
+        # Add separator
+        sep = ttk.Separator(self.master, orient="horizontal")
+        sep.grid(row=row, sticky=tk.W + tk.E, columnspan=col_span, pady=10)
+        return None
 
     def add_minor_label(self, row, col, label, style, columnspan=2):
         """
@@ -561,34 +577,11 @@ class CreateToolTip(object):
             tw.destroy()
 
 
-def running_in_powerfactory():
-    """
-        This function determines whether has been launched from PowerFactory or from a python terminal.
-        If the former then will return the running PowerFactory version otherwise returns None
-    :return str pf_version: Returns running PowerFactory version if applicable
-    """
-
-    # Determine if this script is being run from PowerFactory or plain Python.
-    full_path_executable = sys.executable
-    # Remove the folder path and keep only the executable file (in lower case).
-    executable = os.path.basename(full_path_executable).lower()
-
-    if executable in ['python.exe', 'pythonw.exe']:
-        # If the executable was one of the above, it is a Python session.
-        pf_version = None
-    else:
-        pf_version = os.path.basename(os.path.dirname(full_path_executable))
-
-    return pf_version
-
-
 if __name__ == '__main__':
-    # Determine if running from PowerFactory and if so retrieve the current power factory version
-    pf_version = running_in_powerfactory()
 
     main_gui = pf_control.gui.MainGui()
 
-    selected_dig_path = os.path.join(constants.PowerFactory.default_install_directory, main_gui.selected_pf_version_get)
+    selected_dig_path = os.path.join(constants.PowerFactory.default_install_directory, main_gui.pf_version)
 
     if main_gui.power_factory_launch_button == 1:
         subprocess.Popen(os.path.join(selected_dig_path, 'PowerFactory.exe'))
