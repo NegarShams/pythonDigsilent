@@ -1,25 +1,41 @@
 """
-    Script to handle production of GUI for PF loader
+    Script to handle production of GUI for PowerFactor Launcher
+
+    Author: Jinsheng Peng and David Mills
 
 """
 import os
+import sys
 import glob
 
 import tkinter as tk
 import tkinter.ttk as ttk
 import tkinter.messagebox as messagebox
 from tkinter import *
+from PIL import Image, ImageTk
+import webbrowser
 
 import subprocess
 import platform
 
-import sys
 
 # Reference to local directory used by other packages
 local_directory = os.path.abspath(os.path.dirname(__file__))
 # powerfactory will be defined after initialisation by the PowerFactory class
 powerfactory = None
-app_pf = None
+app = None
+
+# Meta Data
+__version__ = '1.0.0'
+__status__ = 'In Development - Beta'
+
+
+def my_except_hook(exctype, value, traceback):
+    sys.exit(0)
+    return
+
+
+sys.excepthook = my_except_hook
 
 
 class Constants:
@@ -47,6 +63,12 @@ class Constants:
         # Find all PowerFactory versions installed in this location
         power_factory_paths = glob.glob(os.path.join(self.default_install_directory, self.power_factory_search))
         self.available_power_factory_versions = [os.path.basename(x) for x in power_factory_paths]
+
+        for available_version in self.available_power_factory_versions:
+            year = [int(s) for s in available_version.split() if s.isdigit()][0]
+            if int(year) < 2017:
+                self.available_power_factory_versions.remove(available_version)
+
         self.available_power_factory_versions.sort()
 
     def select_power_factory_version(self, pf_version=None):
@@ -67,15 +89,14 @@ class Constants:
         # Find the installation directory for the PowerFactory paths
         self.dig_path = os.path.join(self.default_install_directory, self.target_power_factory)
 
-        current_python_version = '{}.{}'.format(sys.version_info.major, sys.version_info.minor)
-
         # Define the Python Path for PowerFactory
+        current_python_version = '{}.{}'.format(sys.version_info.major, sys.version_info.minor)
         self.dig_python_path = os.path.join(self.dig_path, 'Python', current_python_version)
 
 
 class GuiDefaults:
 
-    gui_title = 'PSC - PowerFactory Loader'
+    gui_title = 'DIgSILENT PowerFactory Launcher'
 
     # Default labels for buttons (only those which get changed during running)
     button_select_settings_label = 'Confirm Selection'
@@ -90,8 +111,8 @@ class GuiDefaults:
     font_heading_color = '#%02x%02x%02x' % (0, 0, 255)
     img_size_psc = (120, 120)
 
-    # img_pth_psc_main = os.path.join(local_directory, 'PSC Logo RGB Vertical.png')
-    # img_pth_psc_window = os.path.join(local_directory, 'PSC Logo no tag-1200.gif')
+    img_pth_psc_main = os.path.join(local_directory, 'PSC Logo RGB Vertical.png')
+    img_pth_psc_window = os.path.join(local_directory, 'PSC Logo no tag-1200.gif')
 
     hyperlink_psc_website = 'https://www.pscconsulting.com/'
 
@@ -146,11 +167,22 @@ class PowerFactory:
             self.c.select_power_factory_version(pf_version=pf_version)
             self.add_python_paths()
 
+        pf_version_year = [int(s) for s in pf_version.split() if s.isdigit()][0]
         # Get PowerFactory application
-        global app_pf
-        app_pf = powerfactory.GetApplication()
+        global app
+        error_code = 0
 
-        return app_pf
+        if pf_version_year > 2018:
+            try:
+                app = powerfactory.GetApplicationExt()
+            except powerfactory.ExitError as error:
+                error_code = error.code
+        else:
+            app = powerfactory.GetApplication()
+            if app is None:
+                error_code = 1
+
+        return error_code
 
 
 class MainGui:
@@ -269,53 +301,68 @@ class MainGui:
             style=self.styles.label_general_left
         )
 
+        self.add_sep(row=self.row(1), col_span=2)
+
+        _ = self.add_version_label(
+            row=self.row(1), col=self.col(), label='Launcher version: {}'.format(__version__), columnspan=2,
+            style=self.styles.label_version_number
+        )
+
         # Add PSC logo in Windows Manager
-        # self.add_psc_logo_wm()
+        self.add_psc_logo_wm()
 
         # Add PSC logo with hyperlink to the website
-        # self.add_logo(
-        #    row=self.row(1), col=self.col(),
-        #    img_pth=GuiDefaults.img_pth_psc_main,
-        #    hyperlink="None",
-        #    size=GuiDefaults.img_size_psc
-        # )
+        self.add_logo(
+            row=self.row(1), col=self.col(),
+            img_pth=GuiDefaults.img_pth_psc_main,
+            hyperlink=GuiDefaults.hyperlink_psc_website,
+            size=GuiDefaults.img_size_psc
+         )
 
+        self.master.lift()
         self.master.mainloop()
 
     def change_licence_settings(self):
 
-        self.status_bar.configure(text="Check VPN connection")
+        self.status_bar.configure(text="Checking VPN connection, please wait.")
         self.master.update()
         response = self.ping(self.c.power_factory_host)
         # and then check the response, if no VPN connection, indicate this in the GUI status output
         if response == 0:
 
             # Open PF in engine mode and get current user
-            self.status_bar.configure(text="Setting up PowerFactory licence (take around 10 seconds)")
+            self.status_bar.configure(text="Setting up PowerFactory licences, please wait for 30 seconds.")
             self.master.update()
 
             self.pf_version = self.selected_pf_version.get()
-            app = self.pf.initialise_power_factory(pf_version=self.pf_version)
-            user = app.GetCurrentUser()
-            # Set selected license
-            user.check_adv = 0
-            user.harm = self.power_quality.get()
-            user.contingency = self.contingency.get()
-            user.qdynsim = self.quasi_dynamic.get()
-            user.script = self.scripting.get()
-            user.stab = self.stability.get()
-            user.smallsig = self.small_signal.get()
-            user.netred = self.network_reduction.get()
-            user.paramid = self.parameter_identification.get()
-            user.prot = self.overcurrent_protection.get()
-            user.arcflash = self.arc_flash.get()
 
-            # Enable PowerFactory Launching Button
-            self.status_bar.configure(text="Licence selection updated, click Launch PowerFactory")
-            self.master.update()
-            self.button_launch_powerfactory.configure(state=tk.NORMAL)
+            pf_import_error = self.pf.initialise_power_factory(pf_version=self.pf_version)
+
+            if pf_import_error > 0:
+                self.status_bar.configure(text="PowerFactory licence not available, please close and try later.")
+                self.master.update()
+            else:
+                user = app.GetCurrentUser()
+
+                # Set selected license
+                user.check_adv = 0
+                user.harm = self.power_quality.get()
+                user.contingency = self.contingency.get()
+                user.qdynsim = self.quasi_dynamic.get()
+                user.script = self.scripting.get()
+                user.stab = self.stability.get()
+                user.smallsig = self.small_signal.get()
+                user.netred = self.network_reduction.get()
+                user.paramid = self.parameter_identification.get()
+                user.prot = self.overcurrent_protection.get()
+                user.arcflash = self.arc_flash.get()
+
+                # Enable PowerFactory Launching Button
+                self.status_bar.configure(text="Licence selection updated, click Launch PowerFactory.")
+                self.master.update()
+                self.button_launch_powerfactory.configure(state=tk.NORMAL)
         else:
-            self.status_bar.configure(text="No VPN Connection")
+            self.status_bar.configure(text="VPN to licence host (digsilent2) was not found, please check.")
 
     def ping(self, host):
         """
@@ -329,7 +376,7 @@ class MainGui:
         # Building the command. Ex: "ping -c 1 google.com"
         command = ['ping', param, '1', host]
 
-        return subprocess.call(command)
+        return subprocess.call(command, shell=True)
 
     def launch_powerfactory(self):
 
@@ -347,6 +394,39 @@ class MainGui:
         # noinspection PyProtectedMember
         self.master.tk.call('wm', 'iconphoto', self.master._w, logo)
         return None
+
+    def add_logo(self, row, col, img_pth, hyperlink=None, size=GuiDefaults.img_size_psc):
+        """
+            Function to add an image which when clicked is a hyperlink to the companies logo.
+            Image is added using a label and changing the it to be an image and binding a hyperlink to it
+        :param int row:  Row number to use
+        :param int col:  Column number to use
+        :param str img_pth:  Path to image to use
+        :param str hyperlink:  (optional=None) Website hyperlink to use
+        :param str tooltip:  (Optional=None) Popup message to use for mouse over
+        :param tuple size: (optional) - Size to make image when inserting
+        :return ttk.Label logo:  Reference to the newly created logo
+        """
+        # Load the image and convert into a suitable size for displaying on the GUI
+        img = Image.open(img_pth)
+        img.thumbnail(size)
+        # Convert to a photo image for inclusion on the GUI
+        img_to_include = ImageTk.PhotoImage(img)
+
+        # Add image to GUI
+        logo = tk.Label(self.master, image=img_to_include, cursor='hand2', justify=tk.CENTER, compound=tk.TOP,
+                        bg='white')
+        logo.photo = img_to_include
+        logo.grid(row=row, column=col, columnspan=2, pady=10)
+
+        # Associate clicking of the button as opening a web browser with the provided hyperlink
+        if hyperlink:
+            logo.bind(
+                GuiDefaults.mouse_button_1,
+                lambda e: webbrowser.open_new(hyperlink)
+            )
+
+        return logo
 
     def row(self, i=0):
         """
@@ -439,6 +519,21 @@ class MainGui:
         lbl.grid(row=row, column=col, columnspan=columnspan, pady=10, sticky=W)
         return lbl
 
+    def add_version_label(self, row, col, label, style, columnspan=2):
+        """
+            Function to add the status to the GUI
+        :param row: Row number to use
+        :param col: Column number to use
+        :param str label: Label to use for header
+        :param sty style: Style to use
+        :param int columnspan:  (optional) - Number of columns to span
+        :return ttk.Label lbl:  Reference to the newly created label
+        """
+        # Add label with the name to the GUI
+        lbl = ttk.Label(self.master, text=label, style=style, font=(GuiDefaults.font_family, 8))
+        lbl.grid(row=row, column=col, columnspan=columnspan, pady=10)
+        return lbl
+
     def add_checkbox(self, row, col, text):
         """
             Function to add checkbox to the GUI
@@ -509,8 +604,8 @@ class MainGui:
         """
         # Ask user to confirm that they actually want to close the window
         result = messagebox.askquestion(
-            title='Exit PowerFactory Loader?',
-            message='Are you sure you want to close the loader'
+            title='Exit PowerFactory Launcher?',
+            message='Are you sure you want to close?'
         )
 
         # Test what option the user provided
@@ -529,7 +624,6 @@ class MainGui:
         """
         # Close all windows and exit Python
         self.master.destroy()
-        # self.logger.exception_handler(*args)
 
         # Close all tkinter windows
         sys.exit(1)
@@ -679,7 +773,6 @@ if __name__ == '__main__':
 
     main_gui = MainGui()
 
-    selected_dig_path = os.path.join(Constants.default_install_directory, main_gui.pf_version)
-
     if main_gui.power_factory_launch_button == 1:
+        selected_dig_path = os.path.join(Constants.default_install_directory, main_gui.pf_version)
         subprocess.Popen(os.path.join(selected_dig_path, 'PowerFactory.exe'))
