@@ -269,6 +269,9 @@ class MainGui:
         self.arc_flash = self.add_checkbox(
             row=self.row(), col=self.col() + 1, text="Arc-Flash Analysis"
         )
+        self.techno_economical = self.add_checkbox(
+            row=self.row(1), col=self.col(), text="Techno-Economical Analysis"
+        )
 
         # Add button for user to confirm selection and open PF in engine mode to change licence settings
         self.button_confirm_settings = self.add_cmd(
@@ -356,6 +359,7 @@ class MainGui:
                 user.paramid = self.parameter_identification.get()
                 user.prot = self.overcurrent_protection.get()
                 user.arcflash = self.arc_flash.get()
+                user.tececo = self.techno_economical.get()
 
                 # Enable PowerFactory Launching Button
                 self.status_bar.configure(text="Licence selection updated, click Launch PowerFactory.")
